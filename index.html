@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Moon Lander — Cargo Missions</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden; background: #000;
+    height: 100%; width: 100%;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { display: block; background: #000; }
+  #hud {
+    position: absolute; top: 10px; left: 10px; color: #0f0;
+    font-size: 15px; line-height: 1.5; text-shadow: 0 0 4px #0f0;
+    user-select: none;
+  }
+  #banner {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    color: #ff0; font-size: 15px; text-shadow: 0 0 6px #ff0;
+    background: rgba(0,0,0,0.5); padding: 6px 14px; border-radius: 6px;
+    opacity: 0; transition: opacity 0.6s; user-select: none; white-space: nowrap;
+  }
+  #msg {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #0f0; font-size: 28px; text-align: center; text-shadow: 0 0 8px #0f0;
+    display: none; user-select: none; width: 90%;
+  }
+  #msg .sub { font-size: 14px; margin-top: 8px; color: #afa; }
+  #msgDetail { font-size: 14px; margin-top: 10px; color: #ff0; line-height: 1.6; }
+  #controls {
+    position: absolute; bottom: 10px; left: 10px; color: #0a0; font-size: 13px;
+    user-select: none;
+  }
+  #touchControls {
+    position: absolute; bottom: 0; left: 0; width: 100%;
+    display: none; justify-content: space-between; align-items: flex-end;
+    padding: 0 20px 20px 20px; box-sizing: border-box; z-index: 10;
+    pointer-events: none;
+  }
+  .touch-btn {
+    pointer-events: auto;
+    width: 72px; height: 72px; border-radius: 50%;
+    background: rgba(0, 255, 0, 0.1); border: 2px solid #0f0; color: #0f0;
+    font-size: 28px; display: flex; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .touch-btn:active, .touch-btn.active {
+    background: rgba(0, 255, 0, 0.4);
+  }
+  #rotateGroup { display: flex; gap: 16px; }
+  #restartBtn {
+    position: absolute; top: 10px; right: 10px; z-index: 10;
+    pointer-events: auto;
+    background: rgba(0, 255, 0, 0.1); border: 2px solid #0f0; color: #0f0;
+    font-size: 13px; padding: 8px 14px; border-radius: 6px; font-family: 'Courier New', monospace;
+  }
+  #restartAllBtn {
+    position: absolute; top: 56px; right: 10px; z-index: 10;
+    pointer-events: auto;
+    background: rgba(255, 80, 80, 0.08); border: 1px solid #a55; color: #d88;
+    font-size: 11px; padding: 5px 10px; border-radius: 6px; font-family: 'Courier New', monospace;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div>Mission: <span id="lvl">1</span>/<span id="lvlTotal">4</span></div>
+  <div>Score: <span id="score">0</span></div>
+  <div>Fuel: <span id="fuel">100</span></div>
+  <div>Altitude: <span id="alt">0</span></div>
+  <div>H-Speed: <span id="hspeed">0</span></div>
+  <div>V-Speed: <span id="vspeed">0</span></div>
+  <div>Hazard: <span id="hazard">None</span></div>
+</div>
+<div id="banner"></div>
+<div id="msg">
+  <div id="msgtext"></div>
+  <div id="msgDetail"></div>
+  <div class="sub" id="msgSub">Press R to restart</div>
+</div>
+<div id="controls">&uarr; / W: Thrust &nbsp; &larr;&rarr; / A D: Rotate &nbsp; N: Retry/Next &nbsp; R: Restart All</div>
+<button id="restartBtn">RESTART</button>
+<button id="restartAllBtn">Restart All</button>
+<div id="touchControls">
+  <div id="rotateGroup">
+    <div class="touch-btn" id="btnLeft">&larr;</div>
+    <div class="touch-btn" id="btnRight">&rarr;</div>
+  </div>
+  <div class="touch-btn" id="btnThrust">&uarr;</div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', () => { resize(); initStars(); loadLevel(currentLevel); });
+
+const GRAVITY = 0.012;
+const THRUST_POWER = 0.045;
+const ROT_SPEED = 1.6;
+const SAFE_V_SPEED = 2.0;
+const SAFE_H_SPEED = 1.5;
+
+const HAZARD_TIERS = [
+  { label: 'None',   chance: 0,       mag: 0 },
+  { label: 'Low',    chance: 0.0025,  mag: 0.5 },
+  { label: 'Medium', chance: 0.0040,  mag: 0.75 },
+  { label: 'High',   chance: 0.0060,  mag: 1.0 }
+];
+
+const LEVELS = [
+  { name: "Outpost Alpha", fuel: 100, hazard: 0, roughness: 35, pads: [{width:5,mult:1},{width:3,mult:2}] },
+  { name: "Outpost Beta",  fuel: 100, hazard: 1, roughness: 50, pads: [{width:4,mult:2},{width:2,mult:3}] },
+  { name: "Outpost Gamma", fuel: 95,  hazard: 2, roughness: 65, pads: [{width:3,mult:3},{width:2,mult:4}] },
+  { name: "Outpost Delta", fuel: 90,  hazard: 3, roughness: 80, pads: [{width:2,mult:4},{width:1,mult:6}] }
+];
+document.getElementById('lvlTotal').textContent = LEVELS.length;
+
+let keys = {};
+function isMobileMode() {
+  const touch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const narrow = window.innerWidth <= 980;
+  return touch || coarse || narrow;
+}
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === 'r') startCampaign();
+  if (k === 'n' && (ship.landed || ship.crashed)) actionButtonPressed();
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+let terrain = [];
+let pads = [];
+let currentLevel = 0;
+let totalScore = 0;
+let currentHazard = HAZARD_TIERS[0];
+let impactFlash = 0;
+let bannerTimeout = null;
+
+function initTerrain(level) {
+  const segments = 60;
+  const segW = W / segments;
+  const numPads = level.pads.length;
+  const zoneWidth = Math.floor((segments - 10) / numPads);
+
+  let padSegStarts = [];
+  for (let p = 0; p < numPads; p++) {
+    const zoneStart = 5 + p * zoneWidth;
+    const maxOffset = Math.max(1, zoneWidth - level.pads[p].width - 2);
+    const offset = Math.floor(Math.random() * maxOffset);
+    padSegStarts.push(zoneStart + offset);
+  }
+
+  let ys = [];
+  let y = H * 0.65 + Math.random() * H * 0.1;
+  for (let i = 0; i <= segments; i++) {
+    y += (Math.random() - 0.5) * level.roughness;
+    y = Math.max(H * 0.35, Math.min(H * 0.9, y));
+    ys.push(y);
+  }
+
+  pads = [];
+  for (let p = 0; p < numPads; p++) {
+    const start = padSegStarts[p];
+    const width = level.pads[p].width;
+    const padY = ys[start];
+    for (let i = start; i <= start + width; i++) ys[i] = padY;
+    pads.push({
+      xStart: start * segW,
+      xEnd: (start + width) * segW,
+      y: padY,
+      mult: level.pads[p].mult
+    });
+  }
+
+  terrain = ys.map((yy, i) => ({ x: i * segW, y: yy }));
+}
+
+let ship;
+
+function triggerMicrometeorite() {
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  const impulse = currentHazard.mag * (0.6 + Math.random() * 0.4);
+  ship.vx += dir * impulse;
+  impactFlash = 12;
+  showBanner('\u2604 Micrometeorite impact!');
+}
+
+function loadLevel(idx) {
+  currentLevel = idx;
+  const lvl = LEVELS[idx];
+  initTerrain(lvl);
+  currentHazard = HAZARD_TIERS[lvl.hazard];
+  impactFlash = 0;
+  ship = {
+    x: W / 2,
+    y: 60,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: 0,
+    angle: 0,
+    fuel: lvl.fuel,
+    thrusting: false,
+    landed: false,
+    crashed: false
+  };
+  document.getElementById('msg').style.display = 'none';
+  document.getElementById('lvl').textContent = idx + 1;
+  document.getElementById('score').textContent = totalScore;
+  document.getElementById('hazard').textContent = currentHazard.label;
+  showBanner('MISSION ' + (idx + 1) + ': ' + lvl.name + '  \u2014  Micrometeorite risk: ' + currentHazard.label);
+}
+
+function startCampaign() {
+  totalScore = 0;
+  loadLevel(0);
+}
+
+function retryMission() {
+  loadLevel(currentLevel);
+}
+
+function showBanner(text) {
+  const b = document.getElementById('banner');
+  b.textContent = text;
+  b.style.opacity = 1;
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => { b.style.opacity = 0; }, 2800);
+}
+
+function getGroundYAt(x) {
+  for (let i = 0; i < terrain.length - 1; i++) {
+    const a = terrain[i], b = terrain[i + 1];
+    if (x >= a.x && x <= b.x) {
+      const t = (x - a.x) / (b.x - a.x);
+      return a.y + (b.y - a.y) * t;
+    }
+  }
+  return H;
+}
+
+function computeScore(pad) {
+  const base = pad.mult * 100;
+  const fuelBonus = Math.round(ship.fuel) * 2;
+  const centerX = (pad.xStart + pad.xEnd) / 2;
+  const dist = Math.abs(ship.x - centerX);
+  const maxDist = (pad.xEnd - pad.xStart) / 2 || 1;
+  const precisionBonus = Math.round((1 - Math.min(dist / maxDist, 1)) * 60);
+  const speedTotal = Math.abs(ship.vx) + Math.abs(ship.vy);
+  const speedBonus = Math.round(Math.max(0, (SAFE_H_SPEED + SAFE_V_SPEED - speedTotal)) * 25);
+  return { base, fuelBonus, precisionBonus, speedBonus, total: base + fuelBonus + precisionBonus + speedBonus };
+}
+
+function update() {
+  if (ship.landed || ship.crashed) return;
+
+  ship.thrusting = false;
+  if ((keys['arrowleft'] || keys['a'])) ship.angle -= ROT_SPEED;
+  if ((keys['arrowright'] || keys['d'])) ship.angle += ROT_SPEED;
+
+  if ((keys['arrowup'] || keys['w']) && ship.fuel > 0) {
+    ship.thrusting = true;
+    const rad = ship.angle * Math.PI / 180;
+    ship.vx += Math.sin(rad) * THRUST_POWER;
+    ship.vy -= Math.cos(rad) * THRUST_POWER;
+    ship.fuel -= 0.4;
+    if (ship.fuel < 0) ship.fuel = 0;
+  }
+
+  ship.vy += GRAVITY;
+  if (currentHazard.chance > 0 && Math.random() < currentHazard.chance) {
+    triggerMicrometeorite();
+  }
+  ship.vx *= 0.995;
+  ship.x += ship.vx;
+  ship.y += ship.vy;
+  if (impactFlash > 0) impactFlash--;
+
+  if (ship.x < 0) ship.x = 0;
+  if (ship.x > W) ship.x = W;
+
+  const groundY = getGroundYAt(ship.x);
+  if (ship.y >= groundY - 8) {
+    ship.y = groundY - 8;
+    const matchedPad = pads.find(p => ship.x >= p.xStart && ship.x <= p.xEnd);
+    const speedOk = Math.abs(ship.vy) <= SAFE_V_SPEED && Math.abs(ship.vx) <= SAFE_H_SPEED;
+    const ang = Math.abs(((ship.angle % 360) + 360) % 360 - 0);
+    const uprightOk = ang < 25 || ang > 335;
+    const isLast = currentLevel === LEVELS.length - 1;
+    const isTouch = isMobileMode();
+
+    if (matchedPad && speedOk && uprightOk) {
+      ship.landed = true;
+      const s = computeScore(matchedPad);
+      totalScore += s.total;
+      document.getElementById('score').textContent = totalScore;
+      showMessage(
+        isLast ? 'ALL MISSIONS COMPLETE!' : 'MISSION COMPLETE',
+        '#0f0',
+        'Pad x' + matchedPad.mult + ' &middot; Fuel +' + s.fuelBonus + ' &middot; Aim +' + s.precisionBonus + ' &middot; Speed +' + s.speedBonus,
+        'Mission score: ' + s.total + '  |  Total: ' + totalScore,
+        isLast ? (isTouch ? 'Tap PLAY AGAIN' : 'Press N or tap to play again') : (isTouch ? 'Tap NEXT MISSION' : 'Press N or tap for next mission')
+      );
+    } else {
+      ship.crashed = true;
+      showMessage(
+        'MISSION FAILED',
+        '#f33',
+        matchedPad ? 'Too fast or tilted for a safe landing' : 'Missed the landing pad',
+        'Total score: ' + totalScore,
+        isTouch ? 'Tap RETRY MISSION' : 'Press N or tap to retry this mission'
+      );
+    }
+    updateActionButton();
+  }
+
+  document.getElementById('fuel').textContent = Math.round(ship.fuel);
+  document.getElementById('alt').textContent = Math.max(0, Math.round(groundY - ship.y));
+  document.getElementById('hspeed').textContent = ship.vx.toFixed(2);
+  document.getElementById('vspeed').textContent = ship.vy.toFixed(2);
+}
+
+function showMessage(title, color, line1, line2, subText) {
+  const msg = document.getElementById('msg');
+  const msgtext = document.getElementById('msgtext');
+  msgtext.textContent = title;
+  msgtext.style.color = color;
+  document.getElementById('msgDetail').innerHTML = (line1 ? line1 : '') + (line2 ? '<br>' + line2 : '');
+  document.getElementById('msgSub').textContent = subText;
+  msg.style.display = 'block';
+}
+
+function updateActionButton() {
+  const btn = document.getElementById('restartBtn');
+  if (ship.crashed) btn.textContent = 'RETRY MISSION';
+  else if (ship.landed) btn.textContent = (currentLevel === LEVELS.length - 1) ? 'PLAY AGAIN' : 'NEXT MISSION';
+}
+
+function actionButtonPressed() {
+  if (!ship) return;
+  if (ship.crashed) { retryMission(); return; }
+  if (ship.landed) {
+    if (currentLevel < LEVELS.length - 1) loadLevel(currentLevel + 1);
+    else startCampaign();
+  }
+}
+
+// Control scheme: touch buttons on mobile, keyboard reference on desktop
+function updateControlScheme() {
+  const mobile = isMobileMode();
+  document.getElementById('touchControls').style.display = mobile ? 'flex' : 'none';
+  document.getElementById('controls').style.display = mobile ? 'none' : 'block';
+}
+updateControlScheme();
+window.addEventListener('resize', updateControlScheme);
+window.addEventListener('orientationchange', updateControlScheme);
+
+function bindHold(el, key) {
+  const start = (e) => { e.preventDefault(); keys[key] = true; el.classList.add('active'); };
+  const end = (e) => { e.preventDefault(); keys[key] = false; el.classList.remove('active'); };
+  el.addEventListener('touchstart', start, { passive: false });
+  el.addEventListener('touchend', end, { passive: false });
+  el.addEventListener('touchcancel', end, { passive: false });
+  el.addEventListener('mousedown', start);
+  el.addEventListener('mouseup', end);
+  el.addEventListener('mouseleave', end);
+}
+bindHold(document.getElementById('btnLeft'), 'arrowleft');
+bindHold(document.getElementById('btnRight'), 'arrowright');
+bindHold(document.getElementById('btnThrust'), 'arrowup');
+
+document.getElementById('restartBtn').addEventListener('click', actionButtonPressed);
+document.getElementById('restartBtn').addEventListener('touchstart', (e) => { e.preventDefault(); actionButtonPressed(); }, { passive: false });
+document.getElementById('restartAllBtn').addEventListener('click', startCampaign);
+document.getElementById('restartAllBtn').addEventListener('touchstart', (e) => { e.preventDefault(); startCampaign(); }, { passive: false });
+
+let stars = [];
+function initStars() {
+  stars = [];
+  for (let i = 0; i < 150; i++) {
+    stars.push({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.5 });
+  }
+}
+initStars();
+
+function drawStars() {
+  ctx.fillStyle = '#fff';
+  for (const s of stars) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawTerrain() {
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(terrain[0].x, terrain[0].y);
+  for (let i = 1; i < terrain.length; i++) ctx.lineTo(terrain[i].x, terrain[i].y);
+  ctx.lineTo(W, H);
+  ctx.lineTo(0, H);
+  ctx.closePath();
+  ctx.fillStyle = '#333';
+  ctx.fill();
+  ctx.stroke();
+
+  for (const pad of pads) {
+    const onThis = ship && ship.x >= pad.xStart && ship.x <= pad.xEnd;
+    const speedOk = ship && Math.abs(ship.vy) <= SAFE_V_SPEED && Math.abs(ship.vx) <= SAFE_H_SPEED;
+    const ang = ship ? Math.abs(((ship.angle % 360) + 360) % 360 - 0) : 999;
+    const uprightOk = ang < 25 || ang > 335;
+    let color = '#08a';
+    if (onThis) color = (speedOk && uprightOk) ? '#0f0' : '#f80';
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(pad.xStart, pad.y);
+    ctx.lineTo(pad.xEnd, pad.y);
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.font = '12px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('x' + pad.mult, (pad.xStart + pad.xEnd) / 2, pad.y - 8);
+  }
+}
+
+function drawShip() {
+  ctx.save();
+  ctx.translate(ship.x, ship.y);
+  ctx.rotate(ship.angle * Math.PI / 180);
+
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -12);
+  ctx.lineTo(-8, 8);
+  ctx.lineTo(-4, 8);
+  ctx.lineTo(-4, 12);
+  ctx.lineTo(4, 12);
+  ctx.lineTo(4, 8);
+  ctx.lineTo(8, 8);
+  ctx.closePath();
+  ctx.stroke();
+
+  if (ship.thrusting) {
+    ctx.fillStyle = '#fa0';
+    ctx.beginPath();
+    ctx.moveTo(-3, 12);
+    ctx.lineTo(0, 12 + 10 + Math.random() * 6);
+    ctx.lineTo(3, 12);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  drawStars();
+  drawTerrain();
+  drawShip();
+  if (impactFlash > 0) {
+    ctx.fillStyle = 'rgba(255, 120, 60, ' + (impactFlash / 12 * 0.15) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+startCampaign();
+loop();
+</script>
+</body>
+</html>
