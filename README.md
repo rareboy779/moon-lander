@@ -12,7 +12,7 @@ Unlike a classic single-attempt Moon Lander clone, this version is framed as a *
 - Failed landings let you retry just that mission instead of restarting the whole campaign
 
 ## Controls
-- **Desktop:** Arrow keys / WASD to rotate and thrust, N to retry/continue, R to restart the campaign
+- **Desktop:** Arrow keys / WAD to rotate and thrust, N/Space to retry/continue, R to restart the campaign
 - **Mobile:** On-screen touch buttons appear automatically
 
 ## How to run
