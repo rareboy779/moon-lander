@@ -80,7 +80,7 @@
   <div id="msgDetail"></div>
   <div class="sub" id="msgSub">Press R to restart</div>
 </div>
-<div id="controls">&uarr; / W: Thrust &nbsp; &larr;&rarr; / A D: Rotate &nbsp; N: Retry/Next &nbsp; R: Restart All</div>
+<div id="controls">&uarr; / W / Space: Thrust &nbsp; &larr;&rarr; / A D: Rotate &nbsp; N / Space: Retry/Next &nbsp; R: Restart All</div>
 <button id="restartBtn">RESTART</button>
 <button id="restartAllBtn">Restart All</button>
 <div id="touchControls">
@@ -132,9 +132,11 @@ function isMobileMode() {
 }
 window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
+  if (k === ' ') e.preventDefault();
   keys[k] = true;
+  if (e.repeat) return;
   if (k === 'r') startCampaign();
-  if (k === 'n' && (ship.landed || ship.crashed)) actionButtonPressed();
+  if ((k === 'n' || k === ' ') && (ship.landed || ship.crashed)) actionButtonPressed();
 });
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
@@ -266,7 +268,7 @@ function update() {
   if ((keys['arrowleft'] || keys['a'])) ship.angle -= ROT_SPEED;
   if ((keys['arrowright'] || keys['d'])) ship.angle += ROT_SPEED;
 
-  if ((keys['arrowup'] || keys['w']) && ship.fuel > 0) {
+  if ((keys['arrowup'] || keys['w'] || keys[' ']) && ship.fuel > 0) {
     ship.thrusting = true;
     const rad = ship.angle * Math.PI / 180;
     ship.vx += Math.sin(rad) * THRUST_POWER;
